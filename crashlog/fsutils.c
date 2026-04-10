@@ -1957,7 +1957,7 @@ int file_read_string(const char *file, char *string) {
  */
 int dir_contains(const char *dir, const char *filename, bool exact) {
     int ret, count = 0;
-    struct dirent **filelist;
+    struct dirent **filelist = NULL;
     char *name;
 
     if (!dir || !filename)
