@@ -352,7 +352,7 @@ int receive_inotify_events(int inotify_fd) {
             LOGI("%s: incomplete inotify_event received (%d bytes), complete it\n", __FUNCTION__, len);
             /* copy the last bytes received */
             if( (unsigned int)len <= sizeof(lastevent) )
-                memcpy(lastevent, buffer, len);
+                 memcpy(lastevent, buffer, (size_t)len);
             else {
                 LOGE("%s: Cannot copy buffer\n", __FUNCTION__);
                 return -1;
@@ -386,12 +386,12 @@ int receive_inotify_events(int inotify_fd) {
             LOGI("%s: truncated inotify_event received (%d bytes missing), complete it\n", __FUNCTION__, missing_bytes);
 
             /* Robustness : check 'lastevent' array size before reading inotify fd*/
-            if( (unsigned int)len > sizeof(lastevent) ) {
+            if( len < 0 || (size_t)len >= sizeof(lastevent) ) {
                 LOGE("%s: not enough space on array lastevent.\n", __FUNCTION__);
                 return -1;
             }
             /* copy the last bytes received */
-            memcpy(lastevent, buffer, len);
+            memcpy(lastevent, buffer, (size_t)len);
             /* now, reads the full last event, including its name field */
             res = read(inotify_fd, &lastevent[len], missing_bytes);
             if ( res != missing_bytes ) {
@@ -481,7 +481,7 @@ int receive_inotify_events(int inotify_fd) {
         }
         if ( entry && entry->pcallback && entry->pcallback(entry, event) < 0 ) {
             LOGE("%s: Can't handle the event %s...\n", __FUNCTION__,
-                event->name);
+                event->len > 0 ? event->name : "");
             dump_inotify_events(orig_buffer, orig_len, lastevent);
             return -1;
         }
