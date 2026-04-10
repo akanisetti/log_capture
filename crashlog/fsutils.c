@@ -578,10 +578,13 @@ int rmfr_match(const char *match) {
     }
 
     while (count--) {
+        if (!filelist[count])
+            continue;
+
         name = filelist[count]->d_name;
         if (!name) {
-            free(path);
-            return -EFAULT;
+            free(filelist[count]);
+            continue;
         }
 
         if (strstr(name, filename)) {
