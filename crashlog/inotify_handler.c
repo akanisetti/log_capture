@@ -358,21 +358,23 @@ int receive_inotify_events(int inotify_fd) {
                 return -1;
             }
             /* read the missing bytes to get the full length */
-            missing_bytes = (int)sizeof(struct inotify_event)-len;
-            if(((int) len + missing_bytes) < ((int)sizeof(lastevent))) {
-                if (read(inotify_fd, &lastevent[len], missing_bytes) != missing_bytes ){
+            missing_bytes = (int)sizeof(struct inotify_event) - len;
+            if (missing_bytes < 0 || (size_t)len + (size_t)missing_bytes >= sizeof(lastevent)) {
+                LOGE("%s: Cannot read missing bytes, not enought space in lastevent\n", __FUNCTION__);
+                return -1;
+            }
+            if (read(inotify_fd, &lastevent[len], (size_t)missing_bytes) != missing_bytes ){
                     LOGE("%s: Cannot complete the last inotify_event received (structure part) - %s\n", __FUNCTION__, strerror(errno));
                     return -1;
-                }
             }
-            else {
-                LOGE("%s: Cannot read missing bytes, not enought space in lastevent\n", __FUNCTION__);
+            if ((size_t)event->len > (sizeof(lastevent) - sizeof(struct inotify_event))) {
+                LOGE("%s: Invalid event name length %u\n", __FUNCTION__, event->len);
                 return -1;
             }
             event = (struct inotify_event*)lastevent;
             /* now, reads the full last event, including its name field */
             if ( read(inotify_fd, &lastevent[sizeof(struct inotify_event)],
-                event->len) != (int)event->len) {
+                (size_t)event->len) != (int)event->len) {
                 LOGE("%s: Cannot complete the last inotify_event received (name part) - %s\n",
                     __FUNCTION__, strerror(errno));
                 return -1;
@@ -380,7 +382,13 @@ int receive_inotify_events(int inotify_fd) {
             len = 0;
             /* now, the last event is complete, we can continue the parsing */
         } else if ( (unsigned int)len < sizeof(struct inotify_event) + event->len ) {
-            int res, missing_bytes = (int)sizeof(struct inotify_event) + event->len - len;
+            int res;
+            int missing_bytes;
+            if ((size_t)event->len > (sizeof(lastevent) - sizeof(struct inotify_event))) {
+                LOGE("%s: Invalid event name length %u\n", __FUNCTION__, event->len);
+                return -1;
+            }
+            missing_bytes = (int)(sizeof(struct inotify_event) + event->len - (unsigned int)len);
             event = (struct inotify_event*)lastevent;
             /* The event was truncated */
             LOGI("%s: truncated inotify_event received (%d bytes missing), complete it\n", __FUNCTION__, missing_bytes);
@@ -390,10 +398,14 @@ int receive_inotify_events(int inotify_fd) {
                 LOGE("%s: not enough space on array lastevent.\n", __FUNCTION__);
                 return -1;
             }
+            if ((size_t)missing_bytes > sizeof(lastevent) - (size_t)len) {
+                LOGE("%s: missing bytes exceed lastevent capacity\n", __FUNCTION__);
+                return -1;
+            }
             /* copy the last bytes received */
             memcpy(lastevent, buffer, (size_t)len);
             /* now, reads the full last event, including its name field */
-            res = read(inotify_fd, &lastevent[len], missing_bytes);
+            res = read(inotify_fd, &lastevent[len], (size_t)missing_bytes);
             if ( res != missing_bytes ) {
                 LOGE("%s: Cannot complete the last inotify_event received (name part2); received %d bytes, expected %d bytes - %s\n",
                     __FUNCTION__, res, missing_bytes, strerror(errno));
@@ -412,25 +424,35 @@ int receive_inotify_events(int inotify_fd) {
             /* event concerns a file into a watched directory */
             entry = get_event_entry(event->wd, (event->len ? event->name : NULL));
             if ( !entry ) {
+                const char *event_name = NULL;
+                char safe_event_name[NAME_MAX + 1];
+                if (event->len > 0) {
+                    size_t event_name_len = strnlen(event->name, event->len);
+                    if (event_name_len > NAME_MAX)
+                        event_name_len = NAME_MAX;
+                    memcpy(safe_event_name, event->name, event_name_len);
+                    safe_event_name[event_name_len] = '\0';
+                    event_name = safe_event_name;
+                }
                 /* Didn't find any entry for this event, check for
                  * a dropbox final event... */
-                if (event->len > 8 && !strncmp(event->name, "dropbox-", 8)) {
+                if (event_name && !strncmp(event_name, "dropbox-", 8)) {
                     /* dumpstate is done so remove the watcher */
                     LOGD("%s: Received a dropbox event(%s)...",
-                        __FUNCTION__, event->name);
+                        __FUNCTION__, event_name);
                     inotify_rm_watch(inotify_fd, event->wd);
                     finalize_dropbox_pending_event(event);
                     continue;
                 }
 
                 const char *expression;
-                if (!event->len) {
+                if (!event_name) {
                     expression = "empty event";
-                } else if ((expression = strrchr(event->name, '.')) != NULL
+                } else if ((expression = strrchr(event_name, '.')) != NULL
                         && strncmp(expression, ".tmp", 5) == 0) {
                     continue;
                 } else {
-                    expression = event->name;
+                    expression = event_name;
                 }
 
                 /* Stray event... */
