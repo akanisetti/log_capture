@@ -1124,7 +1124,8 @@ int raise_infoerror(char *type, char *subtype) {
     }
     LOGE("%-8s%-22s%-20s%s\n", type, key, get_current_time_long(0), subtype);
     free(key);
-    unlink(LOGRESERVED);
+    if (unlink(LOGRESERVED) < 0 && errno != ENOENT)
+        LOGE("%s: failed to unlink %s: %s\n", __FUNCTION__, LOGRESERVED, strerror(errno));
 #ifdef FULL_REPORT
     monitor_crashenv();
 #endif

@@ -94,9 +94,13 @@ static void add_section(char *config, pconfig_handle  conf_handle) {
     if (conf_handle->first == NULL){
     // start the chain off
         conf_handle->first = newsect;
-    }else{
+    } else if (conf_handle->current != NULL) {
     // add on the end of the last section
         conf_handle->current->next = newsect;
+    } else {
+        LOGE("%s: current section pointer is NULL\n", __FUNCTION__);
+        free(newsect);
+        return;
      }
     conf_handle->current = newsect;
     newsect->name = malloc(strlen(config) + 1);

@@ -1304,10 +1304,8 @@ int do_mv(char *src, char *dest) {
 
     if (src == NULL || dest == NULL) return -EINVAL;
 
-    if (stat(src, &info) < 0) {
-        return -errno;
-    }
     /* check if destination exists */
+    /* Note: do not stat(src) before rename() to avoid TOCTOU race; rely on rename() result */
     if (stat(dest, &info)) {
         /* an error, unless the destination was missing */
         if (errno != ENOENT) {

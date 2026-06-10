@@ -351,8 +351,13 @@ int receive_inotify_events(int inotify_fd) {
             /* Not enough room for an empty event */
             LOGI("%s: incomplete inotify_event received (%d bytes), complete it\n", __FUNCTION__, len);
             /* copy the last bytes received */
+            /* Validate len is non-negative before casting to size_t */
+            if (len < 0) {
+                LOGE("%s: len is negative: %d\n", __FUNCTION__, len);
+                return -1;
+            }
             if( (unsigned int)len <= sizeof(lastevent) )
-                memcpy(lastevent, buffer, len);
+                memcpy(lastevent, buffer, (size_t)len);
             else {
                 LOGE("%s: Cannot copy buffer\n", __FUNCTION__);
                 return -1;
@@ -370,7 +375,16 @@ int receive_inotify_events(int inotify_fd) {
                 return -1;
             }
             event = (struct inotify_event*)lastevent;
+            /* Validate untrusted event->len before arithmetic */
+            if (event->len < 0 || event->len > PATHMAX) {
+                LOGE("%s: event->len out of valid range: %d\n", __FUNCTION__, event->len);
+                return -1;
+            }
             /* now, reads the full last event, including its name field */
+            if (sizeof(struct inotify_event) + (size_t)event->len > sizeof(lastevent)) {
+                LOGE("%s: event->len too large for lastevent buffer\n", __FUNCTION__);
+                return -1;
+            }
             if ( read(inotify_fd, &lastevent[sizeof(struct inotify_event)],
                 event->len) != (int)event->len) {
                 LOGE("%s: Cannot complete the last inotify_event received (name part) - %s\n",
@@ -380,20 +394,30 @@ int receive_inotify_events(int inotify_fd) {
             len = 0;
             /* now, the last event is complete, we can continue the parsing */
         } else if ( (unsigned int)len < sizeof(struct inotify_event) + event->len ) {
-            int res, missing_bytes = (int)sizeof(struct inotify_event) + event->len - len;
             event = (struct inotify_event*)lastevent;
+            /* Validate untrusted event->len before arithmetic */
+            if (event->len < 0 || event->len > PATHMAX) {
+                LOGE("%s: event->len out of valid range: %d\n", __FUNCTION__, event->len);
+                return -1;
+            }
+            int res, missing_bytes = (int)sizeof(struct inotify_event) + event->len - len;
             /* The event was truncated */
             LOGI("%s: truncated inotify_event received (%d bytes missing), complete it\n", __FUNCTION__, missing_bytes);
+            /* Validate missing_bytes is within permissible range */
+            if (missing_bytes <= 0 || missing_bytes > PATHMAX) {
+                LOGE("%s: missing_bytes out of valid range: %d\n", __FUNCTION__, missing_bytes);
+                return -1;
+            }
 
             /* Robustness : check 'lastevent' array size before reading inotify fd*/
-            if( (unsigned int)len > sizeof(lastevent) ) {
+            if( (unsigned int)len >= sizeof(lastevent) ) {
                 LOGE("%s: not enough space on array lastevent.\n", __FUNCTION__);
                 return -1;
             }
             /* copy the last bytes received */
             memcpy(lastevent, buffer, len);
             /* now, reads the full last event, including its name field */
-            res = read(inotify_fd, &lastevent[len], missing_bytes);
+            res = read(inotify_fd, &lastevent[len], (size_t)missing_bytes);
             if ( res != missing_bytes ) {
                 LOGE("%s: Cannot complete the last inotify_event received (name part2); received %d bytes, expected %d bytes - %s\n",
                     __FUNCTION__, res, missing_bytes, strerror(errno));
@@ -403,6 +427,11 @@ int receive_inotify_events(int inotify_fd) {
             /* now, the last event is complete, we can continue the parsing */
         } else {
             event = (struct inotify_event *)buffer;
+            /* Validate untrusted event->len before arithmetic */
+            if (event->len < 0 || event->len > PATHMAX) {
+                LOGE("%s: event->len out of valid range: %d\n", __FUNCTION__, event->len);
+                return -1;
+            }
             buffer += sizeof(struct inotify_event) + event->len;
             len -= sizeof(struct inotify_event) + event->len;
         }
@@ -479,9 +508,12 @@ int receive_inotify_events(int inotify_fd) {
                 continue;
             }
         }
+        /* Ensure event->name is null-terminated before passing to callback */
+        if (event->len > 0)
+            event->name[event->len - 1] = '\0';
         if ( entry && entry->pcallback && entry->pcallback(entry, event) < 0 ) {
-            LOGE("%s: Can't handle the event %s...\n", __FUNCTION__,
-                event->name);
+            LOGE("%s: Can't handle the event %.*s...\n", __FUNCTION__,
+                (event->len > 0) ? (int)(event->len - 1) : 0, event->name);
             dump_inotify_events(orig_buffer, orig_len, lastevent);
             return -1;
         }
